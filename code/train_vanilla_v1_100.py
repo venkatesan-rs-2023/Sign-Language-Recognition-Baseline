@@ -34,7 +34,7 @@ def calculate_accuracy(outputs, labels):
     return accuracy
 
 
-def run(configs, mode='rgb', root='/ssd/Charades_v1_rgb', train_split='charades/charades.json', save_model='', weights=None):
+def run(configs, mode='rgb', root='/ssd/Charades_v1_rgb', train_split='charades/charades.json', save_model='', pretrained_i3d_weights=None):
 
 
     train_transforms = transforms.Compose([videotransforms.RandomCrop(224),
@@ -72,7 +72,7 @@ def run(configs, mode='rgb', root='/ssd/Charades_v1_rgb', train_split='charades/
                                              pin_memory=True)
 
     val_dataset = Dataset(train_split, 'test', root, mode, test_transforms)
-    val_dataloader = torch.utils.data.DataLoader(val_dataset, batch_size=configs.batch_size, shuffle=True, num_workers=2,
+    val_dataloader = torch.utils.data.DataLoader(val_dataset, batch_size=configs.batch_size, shuffle=False, num_workers=2,
                                                  pin_memory=False)
     
     dataloaders = {'train': dataloader, 'test': val_dataloader}
@@ -80,7 +80,7 @@ def run(configs, mode='rgb', root='/ssd/Charades_v1_rgb', train_split='charades/
 
 
     i3d = InceptionI3d(100, in_channels=3)
-    i3d.load_state_dict(torch.load('new_pretrained_100.pt', weights_only=True))
+    i3d.load_state_dict(torch.load(pretrained_i3d_weights, weights_only=True))
     feature_extractor = I3DFeatureExtractor(i3d)
     num_classes = dataset.num_classes
 
@@ -108,6 +108,7 @@ def run(configs, mode='rgb', root='/ssd/Charades_v1_rgb', train_split='charades/
     checkpoint_dir = './checkpoints'
     os.makedirs(checkpoint_dir, exist_ok=True)
     best_val_accuracy = 0
+    early_stop = False
 
     for epoch in range(num_epochs):
         # Training phase
@@ -202,11 +203,11 @@ if __name__ == '__main__':
     root = {'word': 'data/WLASL2000'}
     save_model = 'checkpoints/'
     train_split = 'preprocess/nslt_100.json'
-    weights = None
+    weights = 'i3d_pretrained_100.pt'
     config_file = 'configfiles/asl100.ini'
 
     configs = Config(config_file)
-    run(configs=configs, mode=mode, root=root, save_model=save_model, train_split=train_split, weights=weights)
+    run(configs=configs, mode=mode, root=root, save_model=save_model, train_split=train_split, pretrained_i3d_weights=weights)
 
 
 

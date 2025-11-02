@@ -21,8 +21,6 @@ class I3DFeatureExtractor(nn.Module):
             x = self.feature_extractor(x)
         return x
 
-#i3d_feature_extractor = I3DFeatureExtractor(i3d)
-
 # Define Positional Encoding for the Transformer
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model, dropout=0.1, max_len=5000):

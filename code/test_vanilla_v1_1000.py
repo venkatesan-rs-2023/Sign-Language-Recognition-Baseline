@@ -108,7 +108,8 @@ def run(init_lr=0.1,
         train_split='charades/charades.json',
         batch_size=3 * 15,
         save_model='',
-        weights=None):
+        pretrained_i3d_weights=None,
+        pretrained_model_weights=None):
     # setup dataset
     test_transforms = transforms.Compose([videotransforms.CenterCrop(224)])
 
@@ -121,7 +122,7 @@ def run(init_lr=0.1,
     
     # setup the model
     i3d = InceptionI3d(1000, in_channels=3)
-    i3d.load_state_dict(torch.load('i3d_pretrained_1000.pt', weights_only=True))
+    i3d.load_state_dict(torch.load(pretrained_i3d_weights, weights_only=True))
     feature_extractor = I3DFeatureExtractor(i3d)
     num_classes = val_dataset.num_classes
 
@@ -130,7 +131,7 @@ def run(init_lr=0.1,
     model.cuda()
     model = nn.DataParallel(model)
 
-    model.load_state_dict(torch.load("test_vanilla_1000.pth", weights_only=True))
+    model.load_state_dict(torch.load(pretrained_model_weights, weights_only=True))
 
     model.eval()
 
@@ -159,17 +160,6 @@ def run(init_lr=0.1,
     topk = (1, 5, 10)
     topkmetrics = compute_topk_tp_fp(all_outputs, all_labels, num_classes, topk)
 
-
-    # Compute per-class Top-K average accuracy (Precision)
-    #per_class_accuracy = compute_per_class_topk_accuracy(topkmetrics, num_classes, topk)
-
-    # Display the results
-    #for k in topk:
-    #    print(f"\nTop-{k} Per-Class Accuracy (Precision):")
-    #    for cls in range(num_classes):
-    #        print(f"Class {cls}: {per_class_accuracy[k][cls]*100:.2f}%")
-
-
     _, preds = torch.max(all_outputs, 1)
     all_preds = preds.cpu().numpy()
     all_labels = all_labels.cpu().numpy()
@@ -190,6 +180,7 @@ if __name__ == '__main__':
     root = 'data/WLASL2000'
 
     train_split = 'preprocess/nslt_{}.json'.format(num_classes)
-#     weights = 'test_vanilla_v1.pth'
+    weights = 'i3d_pretrained_1000.pt'
+    saved_model = None # Saved checkpoint path to test the model
 
-    run(mode=mode, root=root, save_model=save_model, train_split=train_split )
+    run(mode=mode, root=root, save_model=save_model, train_split=train_split, pretrained_i3d_weights=weights, pretrained_model_weights=saved_model)

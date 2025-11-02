@@ -115,6 +115,12 @@ We use the **Word-Level American Sign Language (WLASL) dataset**, which contains
 - To evaluate the model, use one of the testing scripts. For example:
   `python test_vanilla_v1_2000.py`
 
+#### Pre-trained weights for models
+- We are uploading the model weights for 100, 300 and 1000. Feel free to use them to test the framework or to understand the flow of the project.
+You can find those weights here
+1) Vanilla_v1_100 (https://drive.google.com/drive/folders/1eY6PhtMZfs_F_913lirMdae9_8yJPBWq)
+2) Vanilla_v1_300 (https://drive.google.com/drive/folders/1DyHBJBIqmmLO7pMrII8QSwQ_1BoNs0Vr)
+3) Vanilla_v1_1000 (https://drive.google.com/drive/folders/19D7sIpjUw8pi98uiJQM6_wsaIMzMuWVG)
 
 ### Notes
 

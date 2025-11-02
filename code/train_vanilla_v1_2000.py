@@ -28,7 +28,7 @@ def calculate_accuracy(outputs, labels):
     return accuracy
 
 
-def run(configs, mode='rgb', root='/ssd/Charades_v1_rgb', train_split='charades/charades.json', save_model='', weights=None):
+def run(configs, mode='rgb', root='/ssd/Charades_v1_rgb', train_split='charades/charades.json', save_model='', pretrained_i3d_weights=None, load_checkpoint=None):
 
 
     train_transforms = transforms.Compose([videotransforms.RandomCrop(224),
@@ -40,7 +40,7 @@ def run(configs, mode='rgb', root='/ssd/Charades_v1_rgb', train_split='charades/
                                              pin_memory=True)
 
     val_dataset = Dataset(train_split, 'test', root, mode, test_transforms)
-    val_dataloader = torch.utils.data.DataLoader(val_dataset, batch_size=configs.batch_size, shuffle=True, num_workers=1,
+    val_dataloader = torch.utils.data.DataLoader(val_dataset, batch_size=configs.batch_size, shuffle=False, num_workers=1,
                                                  pin_memory=False)
     
     dataloaders = {'train': dataloader, 'test': val_dataloader}
@@ -48,7 +48,7 @@ def run(configs, mode='rgb', root='/ssd/Charades_v1_rgb', train_split='charades/
 
 
     i3d = InceptionI3d(2000, in_channels=3)
-    i3d.load_state_dict(torch.load('i3d_pretrained_2000.pt', weights_only=True))
+    i3d.load_state_dict(torch.load(pretrained_i3d_weights, weights_only=True))
     feature_extractor = I3DFeatureExtractor(i3d)
     num_classes = dataset.num_classes
 
@@ -63,7 +63,9 @@ def run(configs, mode='rgb', root='/ssd/Charades_v1_rgb', train_split='charades/
     model = model.to(device)
     model = nn.DataParallel(model)
     
-    model.load_state_dict(torch.load("checkpoint_model_20_43.pth", weights_only=True))
+    if load_checkpoint is not None:
+        model.load_state_dict(torch.load(load_checkpoint, weights_only=True))
+        print(f"Loaded checkpoint from {load_checkpoint}")
 
     lr = 1e-4
     weight_decay = 1e-5  
@@ -158,15 +160,6 @@ def run(configs, mode='rgb', root='/ssd/Charades_v1_rgb', train_split='charades/
                 checkpoint_path = os.path.join(checkpoint_dir, f"checkpoint_model_{epoch}_{val_epoch_accuracy:.0f}.pth")
                 torch.save(model.state_dict(), checkpoint_path)
 
-            '''else:
-                epochs_no_improve += 1
-                print(f"No improvement in validation accuracy for {epochs_no_improve} epoch(s).\n")
-                if epochs_no_improve >= patience:
-                    print("Early stopping triggered!")
-                    early_stop = True
-                    break'''
-
-
     if not early_stop:
         # Save the final model
         final_model_path = os.path.join(checkpoint_dir, 'final_model.pth')
@@ -179,11 +172,12 @@ if __name__ == '__main__':
     root = {'word': 'data/WLASL2000'}
     save_model = 'checkpoints/'
     train_split = 'preprocess/nslt_2000.json'
-    weights = None
+    weights = 'i3d_pretrained_2000.pt'
     config_file = 'configfiles/asl2000.ini'
+    load_checkpoint = None
 
     configs = Config(config_file)
-    run(configs=configs, mode=mode, root=root, save_model=save_model, train_split=train_split, weights=weights)
+    run(configs=configs, mode=mode, root=root, save_model=save_model, train_split=train_split, pretrained_i3d_weights=weights, load_checkpoint=load_checkpoint)
 
 
 
