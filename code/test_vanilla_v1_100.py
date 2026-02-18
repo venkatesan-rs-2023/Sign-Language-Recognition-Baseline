@@ -120,16 +120,40 @@ def run(init_lr=0.1,
     
     # setup the model
     i3d = InceptionI3d(100, in_channels=3)
-    i3d.load_state_dict(torch.load(pretrained_i3d_weights, weights_only=True))
+    #i3d.load_state_dict(torch.load(pretrained_i3d_weights, weights_only=True))
+    i3d.load_state_dict(torch.load(pretrained_i3d_weights, map_location=torch.device("cpu")))
     feature_extractor = I3DFeatureExtractor(i3d)
     num_classes = val_dataset.num_classes
 
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = SignLanguageRecognitionModel(feature_extractor, num_classes)
-    
-    model.cuda()
-    model = nn.DataParallel(model)
+    model = model.to(device) #added to support CPU, check whether it would work for GPU.
 
-    model.load_state_dict(torch.load(pretrained_model_weights, weights_only=True))
+    #model.cuda()
+    #model = nn.DataParallel(model)
+    if torch.cuda.device_count() > 1: #enable for CPU block - should work for GPU also.
+        model = nn.DataParallel(model)
+
+    #model.load_state_dict(torch.load(pretrained_model_weights, weights_only=True))
+    """
+    Commenting below line, because was facing some kind of issue with module and not module.
+    """
+    #model.load_state_dict(torch.load(pretrained_model_weights, map_location=torch.device("cpu")))
+    state_dict = torch.load(
+    pretrained_model_weights,
+    map_location=torch.device("cpu")
+    )
+
+# ---- FIX: strip 'module.' prefix from DataParallel checkpoints ----
+    new_state_dict = {}
+    for k, v in state_dict.items():
+        if k.startswith("module."):
+            new_state_dict[k[len("module."):]] = v
+        else:
+            new_state_dict[k] = v
+
+    model.load_state_dict(new_state_dict)
+
 
     model.eval()
 
@@ -175,10 +199,10 @@ if __name__ == '__main__':
     num_classes = 100
     save_model = './checkpoints/'
 
-    root = 'data/WLASL2000'
+    root = 'code/data/WLASL2000'
 
-    train_split = 'preprocess/nslt_{}.json'.format(num_classes)
-    weights = 'i3d_pretrained_100.pt'
-    saved_model = None # Saved checkpoint path to test the model
+    train_split = 'code/preprocess/nslt_{}.json'.format(num_classes)
+    weights = 'code/pretrained/i3d_pretrained_100.pt'
+    saved_model = 'code/pretrained/best_model_40_73.pth' # Saved checkpoint path to test the model
 
     run(mode=mode, root=root, save_model=save_model, train_split=train_split, pretrained_i3d_weights=weights, pretrained_model_weights=saved_model)
