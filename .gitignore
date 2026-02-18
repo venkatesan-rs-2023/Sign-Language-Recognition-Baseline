@@ -5,7 +5,17 @@ start_kit/raw_videos_mp4/
 start_kit/videos/
 
 */__pycache__
+*/*/__pycache__/
+*/.DS_Store
 code/I3D/archived/
 
 *.zip
 code/I3D/test_vanilla_1000.pth
+
+code/data/
+code/archived/
+code/pretrained/
+
+confusionMatrix.npy
+labels.txt
+outputs.txt
