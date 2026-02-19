@@ -120,16 +120,32 @@ def run(init_lr=0.1,
     
     # setup the model
     i3d = InceptionI3d(100, in_channels=3)
-    i3d.load_state_dict(torch.load(pretrained_i3d_weights, weights_only=True))
+    i3d.load_state_dict(torch.load(pretrained_i3d_weights, map_location='cpu', weights_only=True))
     feature_extractor = I3DFeatureExtractor(i3d)
     num_classes = val_dataset.num_classes
 
     model = SignLanguageRecognitionModel(feature_extractor, num_classes)
     
-    model.cuda()
-    model = nn.DataParallel(model)
+    #model.cuda()
+    #model = nn.DataParallel(model)
+    device = torch.device("cpu")
+    model = model.to(device)
+    
+    ###Adding EXTRA lines
 
-    model.load_state_dict(torch.load(pretrained_model_weights, weights_only=True))
+    checkpoint = torch.load(pretrained_model_weights, map_location='cpu')
+
+    from collections import OrderedDict
+    new_state_dict = OrderedDict()
+
+    for k, v in checkpoint.items():
+        name = k.replace('module.', '') 
+        new_state_dict[name] = v
+
+    model.load_state_dict(new_state_dict, strict=False)
+
+
+    #model.load_state_dict(torch.load(pretrained_model_weights, map_location='cpu' , weights_only=True))
 
     model.eval()
 
@@ -179,6 +195,7 @@ if __name__ == '__main__':
 
     train_split = 'preprocess/nslt_{}.json'.format(num_classes)
     weights = 'i3d_pretrained_100.pt'
-    saved_model = None # Saved checkpoint path to test the model
+    saved_model = 'checkpoints/final_model.pth'
+
 
     run(mode=mode, root=root, save_model=save_model, train_split=train_split, pretrained_i3d_weights=weights, pretrained_model_weights=saved_model)

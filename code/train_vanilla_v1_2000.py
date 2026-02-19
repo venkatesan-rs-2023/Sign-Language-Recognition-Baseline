@@ -48,7 +48,7 @@ def run(configs, mode='rgb', root='/ssd/Charades_v1_rgb', train_split='charades/
 
 
     i3d = InceptionI3d(2000, in_channels=3)
-    i3d.load_state_dict(torch.load(pretrained_i3d_weights, weights_only=True))
+    i3d.load_state_dict(torch.load(pretrained_i3d_weights, map_location=torch.device('cpu'), weights_only=True))
     feature_extractor = I3DFeatureExtractor(i3d)
     num_classes = dataset.num_classes
 

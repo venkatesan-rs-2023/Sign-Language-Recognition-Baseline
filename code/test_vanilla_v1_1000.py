@@ -26,7 +26,16 @@ from sklearn.metrics import classification_report, confusion_matrix
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"] = ','.join(map(str, range(torch.cuda.device_count())))
 
+##Extra function added
 
+def remove_module_prefix(state_dict):
+    new_state_dict = {}
+    for k, v in state_dict.items():
+        if k.startswith("module."):
+            new_state_dict[k[7:]] = v
+        else:
+            new_state_dict[k] = v
+    return new_state_dict
 
 def compute_topk_tp_fp(outputs, labels, num_classes, topk=(1, 5, 10)):
     """
@@ -131,7 +140,12 @@ def run(init_lr=0.1,
     model.cuda()
     model = nn.DataParallel(model)
 
-    model.load_state_dict(torch.load(pretrained_model_weights, weights_only=True))
+    state = torch.load(pretrained_model_weights, map_location='cpu', weights_only=True)
+    state = remove_module_prefix(state)
+    model.load_state_dict(state, strict=False)
+
+    #Commenting the below line, added the extra 3 lines on top
+    #model.load_state_dict(torch.load(pretrained_model_weights, weights_only=True))
 
     model.eval()
 
@@ -175,12 +189,12 @@ if __name__ == '__main__':
     # need to add argparse
     mode = 'rgb'
     num_classes = 1000
-    save_model = './checkpoints/'
+    save_model = './checkpoints/' 
 
     root = 'data/WLASL2000'
 
     train_split = 'preprocess/nslt_{}.json'.format(num_classes)
     weights = 'i3d_pretrained_1000.pt'
-    saved_model = None # Saved checkpoint path to test the model
+    saved_model = './checkpoints_cbam/' # Saved checkpoint path to test the model
 
     run(mode=mode, root=root, save_model=save_model, train_split=train_split, pretrained_i3d_weights=weights, pretrained_model_weights=saved_model)

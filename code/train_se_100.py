@@ -18,11 +18,10 @@ from datasets.nslt_dataset import NSLT as Dataset
 
 from torch.utils.data import WeightedRandomSampler
 
-
-from custom_models import SignLanguageRecognitionModel, I3DFeatureExtractor  # Ensure your model script is imported
+# Import SE model
+from custom_models_se import SignLanguageRecognitionModel, I3DFeatureExtractor
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-# os.environ["CUDA_VISIBLE_DEVICES"] = '0'
 os.environ["CUDA_VISIBLE_DEVICES"] = ','.join(map(str, range(torch.cuda.device_count())))
 
 
@@ -35,7 +34,6 @@ def calculate_accuracy(outputs, labels):
 
 
 def run(configs, mode='rgb', root='/ssd/Charades_v1_rgb', train_split='charades/charades.json', save_model='', pretrained_i3d_weights=None):
-
 
     train_transforms = transforms.Compose([videotransforms.RandomCrop(224),
                                            videotransforms.RandomHorizontalFlip(), ])
@@ -63,7 +61,7 @@ def run(configs, mode='rgb', root='/ssd/Charades_v1_rgb', train_split='charades/
                                     num_samples=len(sample_weights_tensor),
                                     replacement=True)
 
-    print (f"Sampler created with {len(sampler)} samples")
+    print(f"Sampler created with {len(sampler)} samples")
 
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=configs.batch_size, 
                                              sampler=sampler, 
@@ -78,36 +76,42 @@ def run(configs, mode='rgb', root='/ssd/Charades_v1_rgb', train_split='charades/
     dataloaders = {'train': dataloader, 'test': val_dataloader}
     datasets = {'train': dataset, 'test': val_dataset}
 
-
+    # Load pretrained I3D
     i3d = InceptionI3d(100, in_channels=3)
     i3d.load_state_dict(torch.load(pretrained_i3d_weights, map_location=torch.device('cpu'), weights_only=True))
     feature_extractor = I3DFeatureExtractor(i3d)
     num_classes = dataset.num_classes
 
+    # Create model with SE attention
     model = SignLanguageRecognitionModel(feature_extractor, num_classes)
 
+    # Freeze I3D feature extractor
     for param in model.feature_extractor.feature_extractor.parameters():
         param.requires_grad = False
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+    print(f"Using device: {device}")
 
     model = model.to(device)
     model = nn.DataParallel(model)
 
-
-    lr = 1e-4
-    weight_decay = 1e-5  
+    # Optimizer - train SE attention and transformer
+    lr = configs.init_lr
+    weight_decay = configs.adam_weight_decay
     criterion = nn.CrossEntropyLoss(weight=class_weights_tensor.to(device))
-    optimizer = optim.Adam(model.module.transformer.parameters(), lr=lr, weight_decay=weight_decay)
+    
+    # Train both SE attention and transformer parameters
+    trainable_params = list(model.module.se_attention.parameters()) + list(model.module.transformer.parameters())
+    optimizer = optim.Adam(trainable_params, lr=lr, weight_decay=weight_decay)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
 
-    num_epochs = 1
-    patience = 5  # For early stopping
+    num_epochs = 50
+    patience = 5
 
     checkpoint_dir = './checkpoints'
     os.makedirs(checkpoint_dir, exist_ok=True)
     best_val_accuracy = 0
+    epochs_no_improve = 0
     early_stop = False
 
     for epoch in range(num_epochs):
@@ -142,60 +146,61 @@ def run(configs, mode='rgb', root='/ssd/Charades_v1_rgb', train_split='charades/
         print(f"Epoch [{epoch+1}/{num_epochs}] Training Loss: {epoch_loss:.4f}, "
             f"Training Accuracy: {epoch_accuracy:.2f}%")
 
+        # Validation phase
+        model.eval()
+        val_running_loss = 0.0
+        val_running_accuracy = 0.0
+        val_total_batches = 0
 
-        if (epoch % 10 == 0):
-            # Validation phase
-            model.eval()
-            val_running_loss = 0.0
-            val_running_accuracy = 0.0
-            val_total_batches = 0
+        with torch.no_grad():
+            for val_batch_idx, (val_inputs, val_labels, val_vids) in enumerate(dataloaders['test']):
+                val_inputs = val_inputs.to(device)
+                val_labels = val_labels.to(device)
 
-            with torch.no_grad():
-                for val_batch_idx, (val_inputs, val_labels, val_vids) in enumerate(dataloaders['test']):
-                    val_inputs = val_inputs.to(device)
-                    val_labels = val_labels.to(device)
+                val_outputs = model(val_inputs)
+                val_loss = criterion(val_outputs, val_labels)
 
-                    val_outputs = model(val_inputs)
-                    val_loss = criterion(val_outputs, val_labels)
+                val_accuracy = calculate_accuracy(val_outputs, val_labels)
 
-                    val_accuracy = calculate_accuracy(val_outputs, val_labels)
+                val_running_loss += val_loss.item()
+                val_running_accuracy += val_accuracy
+                val_total_batches += 1
 
-                    val_running_loss += val_loss.item()
-                    val_running_accuracy += val_accuracy
-                    val_total_batches += 1
+        val_epoch_loss = val_running_loss / val_total_batches
+        val_epoch_accuracy = val_running_accuracy / val_total_batches
 
-            val_epoch_loss = val_running_loss / val_total_batches
-            val_epoch_accuracy = val_running_accuracy / val_total_batches
+        print(f"Epoch [{epoch+1}/{num_epochs}] Validation Loss: {val_epoch_loss:.4f}, "
+            f"Validation Accuracy: {val_epoch_accuracy:.2f}%\n")
 
-            print(f"Epoch [{epoch+1}/{num_epochs}] Validation Loss: {val_epoch_loss:.4f}, "
-                f"Validation Accuracy: {val_epoch_accuracy:.2f}%\n")
+        # Scheduler step
+        scheduler.step()
 
-            # Scheduler step
-            scheduler.step()
+        # Check for improvement
+        if val_epoch_accuracy > best_val_accuracy:
+            best_val_accuracy = val_epoch_accuracy
+            epochs_no_improve = 0
 
-            # Check for improvement
-            if val_epoch_accuracy > best_val_accuracy:
-                best_val_accuracy = val_epoch_accuracy
-                epochs_no_improve = 0
-
-                # Save the best model
-                checkpoint_path = os.path.join(checkpoint_dir, f"best_model_{epoch}_{val_epoch_accuracy:.0f}.pth")
-                torch.save(model.state_dict(), checkpoint_path)
-                print(f"Validation accuracy improved. Model saved to {checkpoint_path}\n")
-            else:
-                epochs_no_improve += 1
-                print(f"No improvement in validation accuracy for {epochs_no_improve} epoch(s).\n")
-                if epochs_no_improve >= patience:
-                    print("Early stopping triggered!")
-                    early_stop = True
-                    break
-
+            # Save the best model
+            checkpoint_path = os.path.join(checkpoint_dir, f"best_model_se_epoch{epoch}_acc{val_epoch_accuracy:.2f}.pth")
+            torch.save(model.state_dict(), checkpoint_path)
+            print(f"✓ Validation accuracy improved to {val_epoch_accuracy:.2f}%. Model saved to {checkpoint_path}\n")
+        else:
+            epochs_no_improve += 1
+            print(f"No improvement in validation accuracy for {epochs_no_improve} epoch(s).\n")
+            if epochs_no_improve >= patience:
+                print("Early stopping triggered!")
+                early_stop = True
+                break
 
     if not early_stop:
         # Save the final model
-        final_model_path = os.path.join(checkpoint_dir, 'final_model.pth')
+        final_model_path = os.path.join(checkpoint_dir, 'final_model_se.pth')
         torch.save(model.state_dict(), final_model_path)
         print(f"Training completed. Final model saved to {final_model_path}")
+
+    print(f"\n{'='*80}")
+    print(f"Best Validation Accuracy: {best_val_accuracy:.2f}%")
+    print(f"{'='*80}\n")
 
 
 if __name__ == '__main__':
@@ -207,17 +212,12 @@ if __name__ == '__main__':
     config_file = 'configfiles/asl100.ini'
 
     configs = Config(config_file)
-    run(configs=configs, mode=mode, root=root, save_model=save_model, train_split=train_split, pretrained_i3d_weights=weights)
-
-
-
-
-
-
-
-
-
-
-
-
-
+    
+    print("="*80)
+    print("Sign Language Recognition with SE (Squeeze-and-Excitation) Attention")
+    print("="*80)
+    print(f"Configuration: {configs}")
+    print("="*80 + "\n")
+    
+    run(configs=configs, mode=mode, root=root, save_model=save_model, 
+        train_split=train_split, pretrained_i3d_weights=weights)
