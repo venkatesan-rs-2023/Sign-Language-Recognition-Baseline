@@ -36,7 +36,7 @@ def calculate_accuracy(outputs, labels):
     return accuracy
 
 
-def run(configs, run_dir, mode='rgb', root='/ssd/Charades_v1_rgb', train_split='charades/charades.json', save_model='', pretrained_i3d_weights=None):
+def run(configs, run_dir, num_epochs, mode='rgb', root='/ssd/Charades_v1_rgb', train_split='charades/charades.json', save_model='', pretrained_i3d_weights=None):
 
 
     train_transforms = transforms.Compose([videotransforms.RandomCrop(224),
@@ -105,7 +105,7 @@ def run(configs, run_dir, mode='rgb', root='/ssd/Charades_v1_rgb', train_split='
     optimizer = optim.Adam(model.module.transformer.parameters(), lr=lr, weight_decay=weight_decay)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
 
-    num_epochs = 1
+    # num_epochs = 1 # Since, now we take num_epochs as argument.
     patience = 5  # For early stopping
     epochs_no_improve = 0 # Previously, You only define epochs_no_improve = 0 inside the “improved” branch, but you increment it in the “not improved” branch. So now initialising it here.
 
@@ -236,6 +236,7 @@ if __name__ == '__main__':
     # NEW - Code for proper directory
     parser = argparse.ArgumentParser()
     parser.add_argument("--run_dir", type=str, default=None)
+    parser.add_argument("--epochs", type=int, default=1) # NEW - taking no.of.epochs as arg.
     args = parser.parse_args()
 
     # If run_dir is not provided, create one under ./runs with a timestamp
@@ -252,11 +253,11 @@ if __name__ == '__main__':
     root = {'word': 'data/WLASL2000'}
     save_model = 'checkpoints/'
     train_split = 'preprocess/nslt_100.json'
-    weights = 'i3d_pretrained_100.pt'
+    weights = 'pretrained/I3D/i3d_pretrained_100.pt'
     config_file = 'configfiles/asl100.ini'
 
     configs = Config(config_file)
-    run(configs=configs, run_dir=run_dir, mode=mode, root=root, save_model=save_model, train_split=train_split, pretrained_i3d_weights=weights)
+    run(configs=configs, run_dir=run_dir, num_epochs=args.epochs, mode=mode, root=root, save_model=save_model, train_split=train_split, pretrained_i3d_weights=weights)
 
 
 
