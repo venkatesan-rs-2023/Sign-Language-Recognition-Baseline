@@ -1,6 +1,8 @@
 import os
 import argparse
 
+from pathlib import Path
+from datetime import datetime
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -34,7 +36,7 @@ def calculate_accuracy(outputs, labels):
     return accuracy
 
 
-def run(configs, mode='rgb', root='/ssd/Charades_v1_rgb', train_split='charades/charades.json', save_model='', pretrained_i3d_weights=None):
+def run(configs, run_dir, mode='rgb', root='/ssd/Charades_v1_rgb', train_split='charades/charades.json', save_model='', pretrained_i3d_weights=None):
 
 
     train_transforms = transforms.Compose([videotransforms.RandomCrop(224),
@@ -107,8 +109,10 @@ def run(configs, mode='rgb', root='/ssd/Charades_v1_rgb', train_split='charades/
     patience = 5  # For early stopping
     epochs_no_improve = 0 # Previously, You only define epochs_no_improve = 0 inside the “improved” branch, but you increment it in the “not improved” branch. So now initialising it here.
 
-    checkpoint_dir = './checkpoints'
-    os.makedirs(checkpoint_dir, exist_ok=True)
+    #checkpoint_dir = './checkpoints'
+    #os.makedirs(checkpoint_dir, exist_ok=True)
+    checkpoint_dir = Path(run_dir) / "checkpoints"
+    checkpoint_dir.mkdir(parents=True, exist_ok=True) # 2 Lines of code for proper output directory.
     best_val_accuracy = 0
     early_stop = False
 
@@ -144,7 +148,20 @@ def run(configs, mode='rgb', root='/ssd/Charades_v1_rgb', train_split='charades/
         print(f"Epoch [{epoch+1}/{num_epochs}] Training Loss: {epoch_loss:.4f}, "
             f"Training Accuracy: {epoch_accuracy:.2f}%")
 
-
+        # Code for Last checkpoint - NEW
+        last_ckpt_path = os.path.join(checkpoint_dir, "last.pth")
+        torch.save(
+            {
+            "epoch": epoch,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "best_val_accuracy": best_val_accuracy,
+            "epochs_no_improve": epochs_no_improve,
+            },
+            last_ckpt_path,
+        )
+        print(f"Saved last checkpoint to {last_ckpt_path}\n", flush=True)
+        # Code end for Last checkpoint - NEW
         if (epoch % 10 == 0):
             # Validation phase
             model.eval()
@@ -181,15 +198,30 @@ def run(configs, mode='rgb', root='/ssd/Charades_v1_rgb', train_split='charades/
                 epochs_no_improve = 0
 
                 # Save the best model
-                checkpoint_path = os.path.join(checkpoint_dir, f"best_model_{epoch}_{val_epoch_accuracy:.0f}.pth")
+                # checkpoint_path = os.path.join(checkpoint_dir, f"best_model_{epoch}_{val_epoch_accuracy:.0f}.pth")
+                checkpoint_path = checkpoint_dir / f"best_model_{epoch}_{val_accuracy:.0f}.pth" # Code for proper directory.
                 torch.save(model.state_dict(), checkpoint_path)
-                print(f"Validation accuracy improved. Model saved to {checkpoint_path}\n")
+                print(f"Validation accuracy improved. Model saved to {checkpoint_path}\n", flush=True)
             else:
                 epochs_no_improve += 1
                 print(f"No improvement in validation accuracy for {epochs_no_improve} epoch(s).\n")
                 if epochs_no_improve >= patience:
                     print("Early stopping triggered!")
                     early_stop = True
+                    # Code for Last checkpoint - NEW
+                    last_ckpt_path = os.path.join(checkpoint_dir, "last.pth")
+                    torch.save(
+                        {
+                        "epoch": epoch,
+                        "model_state_dict": model.state_dict(),
+                        "optimizer_state_dict": optimizer.state_dict(),
+                        "best_val_accuracy": best_val_accuracy,
+                        "epochs_no_improve": epochs_no_improve,
+                        },
+                        last_ckpt_path,
+                    )
+                    print(f"Early stopping. Saved last checkpoint to {last_ckpt_path}\n", flush=True)
+                    # Code End for Last checkpoint
                     break
 
 
@@ -197,10 +229,25 @@ def run(configs, mode='rgb', root='/ssd/Charades_v1_rgb', train_split='charades/
         # Save the final model
         final_model_path = os.path.join(checkpoint_dir, 'final_model.pth')
         torch.save(model.state_dict(), final_model_path)
-        print(f"Training completed. Final model saved to {final_model_path}")
+        print(f"Training completed. Final model saved to {final_model_path}\n", flush=True)
 
 
 if __name__ == '__main__':
+    # NEW - Code for proper directory
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--run_dir", type=str, default=None)
+    args = parser.parse_args()
+
+    # If run_dir is not provided, create one under ./runs with a timestamp
+    if args.run_dir is None:
+        ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        run_dir = Path("runs") / f"vanilla_100_{ts}"
+    else:
+        run_dir = Path(args.run_dir)
+
+    run_dir.mkdir(parents=True, exist_ok=False)
+    # NEW - Code ends for proper directory
+
     mode = 'rgb'
     root = {'word': 'data/WLASL2000'}
     save_model = 'checkpoints/'
@@ -209,11 +256,18 @@ if __name__ == '__main__':
     config_file = 'configfiles/asl100.ini'
 
     configs = Config(config_file)
-    run(configs=configs, mode=mode, root=root, save_model=save_model, train_split=train_split, pretrained_i3d_weights=weights)
+    run(configs=configs, run_dir=run_dir, mode=mode, root=root, save_model=save_model, train_split=train_split, pretrained_i3d_weights=weights)
 
 
 
-
+def get_run_dir(run_dir_arg: str | None, default_name: str) -> Path:
+    if run_dir_arg:
+        run_dir = Path(run_dir_arg)
+    else:
+        ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        run_dir = Path("runs") / f"{default_name}_{ts}"
+    run_dir.mkdir(parents=True, exist_ok=False)
+    return run_dir
 
 
 
