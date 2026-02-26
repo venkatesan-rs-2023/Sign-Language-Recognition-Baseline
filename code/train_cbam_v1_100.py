@@ -133,45 +133,65 @@ def run(configs, run_dir: Path, num_epochs: int, mode='rgb', root='/ssd/Charades
             if (batch_idx + 1) % 10 == 0:
                 print(f"Epoch [{epoch+1}/{num_epochs}], Batch [{batch_idx+1}/{len(dataloaders['train'])}], Loss: {loss.item():.4f}, Acc: {accuracy:.2f}%")
 
-        # Validation Logic
-        model.eval()
-        val_loss, val_acc, val_total = 0.0, 0.0, 0
-        with torch.no_grad():
-            for val_inputs, val_labels, _ in dataloaders['test']:
-                val_inputs, val_labels = val_inputs.to(device), val_labels.to(device)
-                val_outputs = model(val_inputs)
-                val_loss += criterion(val_outputs, val_labels).item()
-                val_acc += calculate_accuracy(val_outputs, val_labels)
-                val_total += 1
+        # -------------------
+        # VALIDATION (every 5 epochs) + EARLY STOP
+        # -------------------
+        early_stop_now = False
 
-        avg_val_acc = val_acc / val_total
-        print(f"Epoch [{epoch+1}] Val Loss: {val_loss/val_total:.4f}, Val Acc: {avg_val_acc:.2f}%")
+        if (epoch + 1) % 5 == 0:
+            model.eval()
+            val_loss, val_acc, val_total = 0.0, 0.0, 0
 
+            with torch.no_grad():
+                for val_inputs, val_labels, _ in dataloaders['test']:
+                    val_inputs, val_labels = val_inputs.to(device), val_labels.to(device)
+                    val_outputs = model(val_inputs)
+                    val_loss += criterion(val_outputs, val_labels).item()
+                    val_acc += calculate_accuracy(val_outputs, val_labels)
+                    val_total += 1
+
+            avg_val_acc = val_acc / val_total
+            print(f"Epoch [{epoch+1}] Val Loss: {val_loss/val_total:.4f}, Val Acc: {avg_val_acc:.2f}%")
+
+            if avg_val_acc > best_val_accuracy:
+                best_val_accuracy = avg_val_acc
+                epochs_no_improve = 0
+
+                checkpoint_path = checkpoint_dir / f"best_model_{epoch+1}_{avg_val_acc:.0f}.pth"
+                torch.save(base_model.state_dict(), checkpoint_path)
+                print(f"Validation accuracy improved. Model saved to {checkpoint_path}\n", flush=True)
+            else:
+                epochs_no_improve += 1
+                if epochs_no_improve >= patience:
+                    print("Early stopping triggered!", flush=True)
+                    early_stop_now = True
+
+        # -------------------
+        # SCHEDULER STEP (every epoch)
+        # -------------------
         scheduler.step()
 
-        # Save a "last checkpoint" every epoch (useful for resuming/debugging)
+        # -------------------
+        # SAVE LAST CHECKPOINT (every epoch)
+        # -------------------
         last_ckpt_path = checkpoint_dir / "last.pth"
-        torch.save({
-            "epoch": epoch + 1,
-            "model_state_dict": base_model.state_dict(),
-            "optimizer_state_dict": optimizer.state_dict(),
-            "best_val_accuracy": best_val_accuracy,
-            "epochs_no_improve": epochs_no_improve,
-        }, last_ckpt_path)
+        torch.save(
+            {
+                "epoch": epoch,
+                "model_state_dict": base_model.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "best_val_accuracy": best_val_accuracy,
+                "epochs_no_improve": epochs_no_improve,
+            },
+            last_ckpt_path,
+        )
+        print(f"Saved last checkpoint to {last_ckpt_path}\n", flush=True)
 
-
-        if avg_val_acc > best_val_accuracy:
-            best_val_accuracy = avg_val_acc
-            epochs_no_improve = 0
-            checkpoint_path = checkpoint_dir / f"best_model_{epoch+1}_{avg_val_acc:.0f}.pth"
-            torch.save(base_model.state_dict(), checkpoint_path)
-            print(f"Validation accuracy improved. Model saved to {checkpoint_path}\n")
-            # (message printed above with checkpoint path)
-        else:
-            epochs_no_improve += 1
-            if epochs_no_improve >= patience:
-                print("Early stopping triggered!")
-                break
+        # -------------------
+        # BREAK AFTER SAVING LAST (if early stop was triggered)
+        # -------------------
+        if early_stop_now:
+            break
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--epochs', type=int, default=2, help='Number of epochs to train')
