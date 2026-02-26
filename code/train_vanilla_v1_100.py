@@ -9,7 +9,8 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.autograd import Variable
 
-from torchvision import transforms
+#Commenting because torchvision might cause problems in cluster.
+# from torchvision import transforms 
 import videotransforms
 
 import numpy as np
@@ -22,6 +23,16 @@ from torch.utils.data import WeightedRandomSampler
 
 
 from custom_models import SignLanguageRecognitionModel, I3DFeatureExtractor  # Ensure your model script is imported
+
+# NEW - class to replace the transforms.Compose we imported from torchvision - which might cause problems in cluster.
+class Compose:
+    def __init__(self, transforms):
+        self.transforms = transforms
+
+    def __call__(self, x):
+        for t in self.transforms:
+            x = t(x)
+        return x
 
 # os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID" # manually setting it might cause issues on cluster, so commenting it.
 # os.environ["CUDA_VISIBLE_DEVICES"] = '0'
@@ -39,9 +50,9 @@ def calculate_accuracy(outputs, labels):
 def run(configs, run_dir, num_epochs, mode='rgb', root='/ssd/Charades_v1_rgb', train_split='charades/charades.json', save_model='', pretrained_i3d_weights=None):
 
 
-    train_transforms = transforms.Compose([videotransforms.RandomCrop(224),
+    train_transforms = Compose([videotransforms.RandomCrop(224),
                                            videotransforms.RandomHorizontalFlip(), ])
-    test_transforms = transforms.Compose([videotransforms.CenterCrop(224)])
+    test_transforms = Compose([videotransforms.CenterCrop(224)])
 
     dataset = Dataset(train_split, 'train', root, mode, train_transforms)
 
