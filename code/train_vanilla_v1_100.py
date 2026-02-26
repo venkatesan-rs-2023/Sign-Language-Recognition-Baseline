@@ -21,10 +21,10 @@ from torch.utils.data import WeightedRandomSampler
 
 from custom_models import SignLanguageRecognitionModel, I3DFeatureExtractor  # Ensure your model script is imported
 
-os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+# os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID" # manually setting it might cause issues on cluster, so commenting it.
 # os.environ["CUDA_VISIBLE_DEVICES"] = '0'
-os.environ["CUDA_VISIBLE_DEVICES"] = ','.join(map(str, range(torch.cuda.device_count())))
-
+# os.environ["CUDA_VISIBLE_DEVICES"] = ','.join(map(str, range(torch.cuda.device_count()))) # manually setting it might cause issues on cluster, so commenting it.
+print("CUDA_VISIBLE_DEVICES =", os.environ.get("CUDA_VISIBLE_DEVICES")) # sanity check, not needed tho.
 
 def calculate_accuracy(outputs, labels):
     # Get the index of the max log-probability
@@ -93,8 +93,9 @@ def run(configs, mode='rgb', root='/ssd/Charades_v1_rgb', train_split='charades/
 
 
     model = model.to(device)
-    model = nn.DataParallel(model)
-
+    # model = nn.DataParallel(model)
+    if torch.cuda.device_count() > 1:
+        model = nn.DataParallel(model) # On a cluster where Slurm allocates one GPU, DataParallel works but adds overhead. So put inside if condition.
 
     lr = 1e-4
     weight_decay = 1e-5  
@@ -104,6 +105,7 @@ def run(configs, mode='rgb', root='/ssd/Charades_v1_rgb', train_split='charades/
 
     num_epochs = 1
     patience = 5  # For early stopping
+    epochs_no_improve = 0 # Previously, You only define epochs_no_improve = 0 inside the “improved” branch, but you increment it in the “not improved” branch. So now initialising it here.
 
     checkpoint_dir = './checkpoints'
     os.makedirs(checkpoint_dir, exist_ok=True)
