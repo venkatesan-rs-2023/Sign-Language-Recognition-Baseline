@@ -1,13 +1,26 @@
 import os
 import argparse
+from pathlib import Path
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.autograd import Variable
-from torchvision import transforms
+# from torchvision import transforms  # removed: only Compose was used
 import videotransforms
+
+class Compose:
+    """Minimal replacement for torchvision.Compose."""
+    def __init__(self, transforms):
+        self.transforms = transforms
+
+    def __call__(self, x):
+        for t in self.transforms:
+            x = t(x)
+        return x
+
 import numpy as np
+import datetime
 
 from configs import Config
 from pytorch_i3d import InceptionI3d
@@ -18,8 +31,9 @@ from torch.utils.data import WeightedRandomSampler
 from custom_models import I3DFeatureExtractor
 from cbam_models import SignLanguageRecognitionModelCBAM
 
-os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"] = ','.join(map(str, range(torch.cuda.device_count())))
+# os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+# os.environ["CUDA_VISIBLE_DEVICES"] = ','.join(map(str, range(torch.cuda.device_count())))
+print("CUDA_VISIBLE_DEVICES =", os.environ.get("CUDA_VISIBLE_DEVICES"))
 
 def calculate_accuracy(outputs, labels):
     _, preds = torch.max(outputs, 1)
@@ -27,11 +41,11 @@ def calculate_accuracy(outputs, labels):
     accuracy = correct / labels.size(0) * 100
     return accuracy
 
-def run(configs, mode='rgb', root='/ssd/Charades_v1_rgb', train_split='charades/charades.json', save_model='', pretrained_i3d_weights=None):
+def run(configs, run_dir: Path, num_epochs: int, mode='rgb', root='/ssd/Charades_v1_rgb', train_split='charades/charades.json', save_model='', pretrained_i3d_weights=None):
     # Setup Data Augmentation
-    train_transforms = transforms.Compose([videotransforms.RandomCrop(224),
+    train_transforms = Compose([videotransforms.RandomCrop(224),
                                            videotransforms.RandomHorizontalFlip(), ])
-    test_transforms = transforms.Compose([videotransforms.CenterCrop(224)])
+    test_transforms = Compose([videotransforms.CenterCrop(224)])
 
     # Dataset Setup
     dataset = Dataset(train_split, 'train', root, mode, train_transforms)
@@ -72,7 +86,8 @@ def run(configs, mode='rgb', root='/ssd/Charades_v1_rgb', train_split='charades/
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
-    model = nn.DataParallel(model)
+    if torch.cuda.is_available() and torch.cuda.device_count() > 1:
+        model = nn.DataParallel(model)
 
     # Optimizer configuration: Include CBAM and Transformer parameters
     lr = 1e-4
@@ -80,17 +95,18 @@ def run(configs, mode='rgb', root='/ssd/Charades_v1_rgb', train_split='charades/
     criterion = nn.CrossEntropyLoss(weight=class_weights_tensor.to(device))
     
     # We ensure model.module is used to access parameters when using DataParallel
+    base_model = model.module if hasattr(model, "module") else model
     optimizer = optim.Adam([
-        {'params': model.module.cbam.parameters()},
-        {'params': model.module.transformer.parameters()}
+        {'params': base_model.cbam.parameters()},
+        {'params': base_model.transformer.parameters()}
     ], lr=lr, weight_decay=weight_decay)
     
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
 
-    num_epochs = 2 # Adjusted for typical training runs
+    # num_epochs is provided as an argument
     patience = 5
-    checkpoint_dir = './checkpoints_cbam'
-    os.makedirs(checkpoint_dir, exist_ok=True)
+    checkpoint_dir = Path(run_dir) / "checkpoints"
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
     
     best_val_accuracy = 0
     epochs_no_improve = 0
@@ -133,24 +149,49 @@ def run(configs, mode='rgb', root='/ssd/Charades_v1_rgb', train_split='charades/
 
         scheduler.step()
 
+        # Save a "last checkpoint" every epoch (useful for resuming/debugging)
+        last_ckpt_path = checkpoint_dir / "last.pth"
+        torch.save({
+            "epoch": epoch + 1,
+            "model_state_dict": base_model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "best_val_accuracy": best_val_accuracy,
+            "epochs_no_improve": epochs_no_improve,
+        }, last_ckpt_path)
+
+
         if avg_val_acc > best_val_accuracy:
             best_val_accuracy = avg_val_acc
             epochs_no_improve = 0
-            torch.save(model.state_dict(), os.path.join(checkpoint_dir, f"best_cbam_model.pth"))
-            print("Model Improved and Saved.\n")
+            checkpoint_path = checkpoint_dir / f"best_model_{epoch+1}_{avg_val_acc:.0f}.pth"
+            torch.save(base_model.state_dict(), checkpoint_path)
+            print(f"Validation accuracy improved. Model saved to {checkpoint_path}\n")
+            # (message printed above with checkpoint path)
         else:
             epochs_no_improve += 1
             if epochs_no_improve >= patience:
                 print("Early stopping triggered!")
                 break
-
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--epochs', type=int, default=2, help='Number of epochs to train')
+    parser.add_argument('--run_dir', type=str, default=None, help='Output directory for this run')
+    args = parser.parse_args()
+
     mode = 'rgb'
     root = {'word': 'data/WLASL2000'}
-    save_model = 'checkpoints_cbam/'
     train_split = 'preprocess/nslt_100.json'
-    weights = 'i3d_pretrained_100.pt'
+    weights = 'pretrained/I3D/i3d_pretrained_100.pt'
     config_file = 'configfiles/asl100.ini'
 
     configs = Config(config_file)
-    run(configs=configs, mode=mode, root=root, save_model=save_model, train_split=train_split, pretrained_i3d_weights=weights)
+
+    if args.run_dir is None:
+        ts = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+        run_dir = Path('runs') / f'cbam_100_{ts}'
+    else:
+        run_dir = Path(args.run_dir)
+
+    run_dir.mkdir(parents=True, exist_ok=False)
+
+    run(configs=configs, run_dir=run_dir, num_epochs=args.epochs, mode=mode, root=root, train_split=train_split, pretrained_i3d_weights=weights)

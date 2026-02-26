@@ -14,4 +14,5 @@ code/I3D/test_vanilla_1000.pth
 code/data/*
 code/pretrained/
 model-weights
+cluster_scripts
 code/sample_sign.mp4

@@ -113,7 +113,8 @@ def run(configs, run_dir, num_epochs, mode='rgb', root='/ssd/Charades_v1_rgb', t
     lr = 1e-4
     weight_decay = 1e-5  
     criterion = nn.CrossEntropyLoss(weight=class_weights_tensor.to(device))
-    optimizer = optim.Adam(model.module.transformer.parameters(), lr=lr, weight_decay=weight_decay)
+    base_model = model.module if hasattr(model, "module") else model
+    optimizer = optim.Adam(base_model.transformer.parameters(), lr=lr, weight_decay=weight_decay)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
 
     # num_epochs = 1 # Since, now we take num_epochs as argument.
@@ -210,7 +211,7 @@ def run(configs, run_dir, num_epochs, mode='rgb', root='/ssd/Charades_v1_rgb', t
 
                 # Save the best model
                 # checkpoint_path = os.path.join(checkpoint_dir, f"best_model_{epoch}_{val_epoch_accuracy:.0f}.pth")
-                checkpoint_path = checkpoint_dir / f"best_model_{epoch}_{val_accuracy:.0f}.pth" # Code for proper directory.
+                checkpoint_path = checkpoint_dir / f"best_model_{epoch}_{val_epoch_accuracy:.2f}.pth" # Code for proper directory.
                 torch.save(model.state_dict(), checkpoint_path)
                 print(f"Validation accuracy improved. Model saved to {checkpoint_path}\n", flush=True)
             else:
